@@ -13,4 +13,4 @@ DarkSky Weather by Bodmer
   Time by Paul Stoffregen
   The ESP32 Board support Package for Arduino by espressif
 
-Thanks and credit to all of them. 
+Thanks and credit to all of them. A few of these files are from Bodmer's libraries. They are included as that is how he intended for them to be employed in the project.
