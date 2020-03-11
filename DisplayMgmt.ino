@@ -37,6 +37,8 @@ void dispMgr( void * parameter) {
   ledcSetup(0, 5000, 8);
   ledcAttachPin(TFT_BACKLIGHT_OUT_PIN, 0);
 
+  controlBacklight(); // set the screen brightness
+
   if ( esp_task_wdt_add(NULL) != ESP_OK) { // add task to WDT
     Serial.println("dispMgr: Unable to add displayMgr to taskWDT!");
   }
@@ -62,21 +64,19 @@ void dispMgr( void * parameter) {
     x = tft.readcommand8(ILI9341_RDSELFDIAG);
     Serial.print("Self Diagnostic: 0x"); Serial.println(x, HEX);
 
-    tft.setFreeFont(FSSB12);
-    tft.setTextDatum(MC_DATUM); // Centre text on x,y position
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-
-    drawTextString("Waiting for Time Sync.", tft.width() / 2, tft.height() / 2, FSSB12, 320, MC_DATUM, TFT_WHITE, TFT_BLACK);
-
-    while (timeStatus() != timeSet) {
-      vTaskDelay(500 / portTICK_PERIOD_MS);
-      Serial.println("dispMgr: Delaying start of screen. Status: " + String(timeStatus()));
-    }
+    tft.fillScreen(TFT_BLACK);
     xSemaphoreGive(tftMutex);
   }
   else {
     Serial.print("dispMgr: Unable to set up Display. Restarting.");
     ESP.restart();
+  }
+
+  drawTextString("Waiting for Time Sync.", tft.width() / 2, tft.height() / 2, FSSB12, 320, MC_DATUM, TFT_WHITE, TFT_BLACK);
+
+  while (timeStatus() != timeSet) {
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    Serial.println("dispMgr: Delaying start of screen. Status: " + String(timeStatus()));
   }
 
   ts = now();
@@ -251,7 +251,7 @@ void drawTime(time_t ts, bool repaint)
       tft.setFreeFont(FSS9);
       tft.setTextDatum(C_BASELINE); // Centre text on x,y position
       tft.setTextColor(TFT_GREEN, TFT_BLACK);
-      padding = tft.textWidth(" Sunday Dec. 99 9999 ", GFXFF);
+      padding = tft.textWidth(" Saturday Dec. 99 9999 ", GFXFF);
       tft.setTextPadding(padding);
       tft.drawString(dateString, xpos, 20, GFXFF);
       xSemaphoreGive(tftMutex);
@@ -1191,7 +1191,6 @@ void clearWorkingArea() {
 //===================================================================
 //================ Text Formatting  =================================
 //===================================================================
-
 String formatWindString(float windSpeed, float windGust , float windBearing) {
   String compass;
   String msg;
