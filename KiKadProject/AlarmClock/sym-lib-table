@@ -1,0 +1,3 @@
+(sym_lib_table
+  (lib (name AlarmClock-rescue)(type Legacy)(uri ${KIPRJMOD}/AlarmClock-rescue.lib)(options "")(descr ""))
+)
