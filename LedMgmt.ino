@@ -23,7 +23,7 @@ void ledMgr( void * parameter) {
   const HsbColor blackColor(0, 0, 0);
 
   const HsbColor sunriseStartColor = HsbColor(0.0f, 0.9f, 0.07f);
-  const HsbColor sunriseEndColor = HsbColor(0.1f, 0.5f, 0.8f);
+  const HsbColor sunriseEndColor = HsbColor(0.1f, 0.6f, 0.6f);
 
   vTaskDelay(500 / portTICK_PERIOD_MS);// let other tasks get going
   Serial.println("ledMgr: ledMgr running...");
@@ -38,8 +38,8 @@ void ledMgr( void * parameter) {
   strip.Begin();
   strip.Show();
 
-  int loopPeriod = round(1000 / LED_CTRL_LOOP_FREQUENCY);
-  const TickType_t xFrequency = loopPeriod / portTICK_PERIOD_MS; // run the master display loop at 15Hz
+  int loopPeriod = round(1000 / LED_CTRL_LOOP_FREQUENCY); // run the master display loop at 15Hz
+  const TickType_t xFrequency = loopPeriod / portTICK_PERIOD_MS;
   xLastWakeTime = xTaskGetTickCount();
   for (;;) {
     loopcount++;
@@ -48,21 +48,6 @@ void ledMgr( void * parameter) {
     }
 
     // main loop
-    /* does this DO anything?
-      if (lastReadState != ledMaster.getReadLightState()) {
-      lastReadState = ledMaster.getReadLightState();
-      if (ledMaster.getReadLightState()) ledMaster.readLightOn();
-      else ledMaster.readLightOff();
-      }
-
-      if (lastRoomState != ledMaster.getRoomLightState()) {
-      lastRoomState = ledMaster.getRoomLightState();
-      if (ledMaster.getRoomLightState()) ledMaster.roomLightOn();
-      else if (ledMaster.getNightLightState()) ledMaster.nightLightOn();
-      else ledMaster.roomLightOff();
-      }
-    */
-
     if (loopcount % LED_CTRL_LOOP_FREQUENCY == 0 ) { // check the alarms once a second
       time_t tn = now();
       if (alarm1.isSunriseActive() && ledMaster.getRoomLightState() == false) {
@@ -73,7 +58,8 @@ void ledMgr( void * parameter) {
           float progress = (sunriseTime - (float)timeRemain) / sunriseTime;
           //Serial.println("ledMgr: progress: " + String(progress));
           HsbColor sunriseColor = HsbColor::LinearBlend<NeoHueBlendShortestDistance>(sunriseStartColor, sunriseEndColor, progress);
-          ledMaster.setActiveRoomLightColorHSB(sunriseColor.H, sunriseColor.S, sunriseColor.B);
+          ledMaster.setActiveSunriseRoomLightColorHSB(sunriseColor.H, sunriseColor.S, sunriseColor.B);
+          ledMaster.sunriseLightOn();
         }
       }
       else if (alarm2.isSunriseActive() && ledMaster.getRoomLightState() == false) {
@@ -82,7 +68,8 @@ void ledMgr( void * parameter) {
         if (timeRemain <= sunriseTime) {
           float progress = (sunriseTime - (float)timeRemain) / sunriseTime;
           HsbColor sunriseColor = HsbColor::LinearBlend<NeoHueBlendShortestDistance>(sunriseStartColor, sunriseEndColor, progress);
-          ledMaster.setActiveRoomLightColorHSB(sunriseColor.H, sunriseColor.S, sunriseColor.B);
+          ledMaster.setActiveSunriseRoomLightColorHSB(sunriseColor.H, sunriseColor.S, sunriseColor.B);
+          ledMaster.sunriseLightOn();
         }
       }
       else if (alarm3.isSunriseActive() && ledMaster.getRoomLightState() == false) {
@@ -91,7 +78,8 @@ void ledMgr( void * parameter) {
         if (timeRemain <= sunriseTime) {
           float progress = (sunriseTime - (float)timeRemain) / sunriseTime;
           HsbColor sunriseColor = HsbColor::LinearBlend<NeoHueBlendShortestDistance>(sunriseStartColor, sunriseEndColor, progress);
-          ledMaster.setActiveRoomLightColorHSB(sunriseColor.H, sunriseColor.S, sunriseColor.B);
+          ledMaster.setActiveSunriseRoomLightColorHSB(sunriseColor.H, sunriseColor.S, sunriseColor.B);
+          ledMaster.sunriseLightOn();
         }
       }
 
@@ -99,20 +87,23 @@ void ledMgr( void * parameter) {
       if (alarm1.isSunriseActive() == false && lastSunriseActive1 == true && ledMaster.getRoomLightState() == false) {
         lastSunriseActive1 = false;
         ledMaster.setActiveRoomLightColorHSB(blackColor.H, blackColor.S, blackColor.B);
+        ledMaster.sunriseLightOff();
       }
       if (alarm2.isSunriseActive() == false && lastSunriseActive2 == true && ledMaster.getRoomLightState() == false) {
         lastSunriseActive2 = false;
         ledMaster.setActiveRoomLightColorHSB(blackColor.H, blackColor.S, blackColor.B);
+        ledMaster.sunriseLightOff();
       }
       if (alarm3.isSunriseActive() == false && lastSunriseActive3 == true && ledMaster.getRoomLightState() == false) {
         lastSunriseActive3 = false;
         ledMaster.setActiveRoomLightColorHSB(blackColor.H, blackColor.S, blackColor.B);
+        ledMaster.sunriseLightOff();
       }
     }
 
-    if (loopcount % (10 * LED_CTRL_LOOP_FREQUENCY) == 0 ) { // send a message onceevery 10 sec. just to be safe
+    if (loopcount % (10 * LED_CTRL_LOOP_FREQUENCY) == 0 ) { // send a message once every 10 sec. just to be safe
       ledMaster.Dirty();
-      vTaskDelay(10 / portTICK_PERIOD_MS); // This is just to feed the IDLE watchdog
+      vTaskDelay(2 / portTICK_PERIOD_MS); // This is just to feed the IDLE watchdog
     }
 
     if (esp_task_wdt_reset() != ESP_OK) {
@@ -142,10 +133,6 @@ void ledDriver( void * parameter) {
   const TickType_t xFrequency = 33 / portTICK_PERIOD_MS; // run the master display loop at about 30Hz
   xLastWakeTime = xTaskGetTickCount();
   for (;;) {
-    /*
-      loopcount++;
-      if (loopcount == 10000) loopcount = 0;
-    */
     if (ledMaster.CanShow() && ledMaster.IsDirty()) {
       if (xSemaphoreTake(ledMutex, (TickType_t) 10) == pdTRUE ) {
         disp.setSpriteEnable(false);

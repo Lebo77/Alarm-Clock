@@ -14,7 +14,7 @@
 
 #ifndef DEMO_MODE
 #define SNOOZE_TIME 5 // snooze for 5 minutes per cycle
-#else 
+#else
 #define SNOOZE_TIME 1 // snooze for 5 minutes per cycle
 #endif
 
@@ -204,7 +204,13 @@ class alarmData {
     }
 
     bool alarmTest(time_t ts) { // is it time to triger the alarm?
-      if ( (alarmDays & ACTIVE) && (hour(ts) == snoozeHour) && (minute(ts) == snoozeMinute) ) {
+      uint8_t locHour = hour(ts);
+      if (locHour == 0) {
+        locHour = 24;  // correct from 0-23 to 1-24 format
+      }
+      //Serial.println("alarmTest: hour: " + String(locHour) + " snoozehour: " + String(snoozeHour));
+      //Serial.println("alarmTest: minute: " + String(minute(ts)) + " snoozeminute: " + String(snoozeMinute));
+      if ( (alarmDays & ACTIVE) && (locHour == snoozeHour) && (minute(ts) == snoozeMinute) ) {
         if (alarmDays & (1 << (weekday(ts) - 1) ) || snoozecount ) {
           return true;
         }
@@ -215,17 +221,23 @@ class alarmData {
     uint32_t secondsToAlarm ( time_t ts ) { // only returns valid information for alarms in the next 2 days
       int16_t inMinutes = minute(ts);
       int16_t inHour = hour(ts);
+      if (inHour == 0) {
+        inHour = 24; // correct from 0-23 to 1-24 format
+      }
       int16_t inSeconds = second(ts);
       uint8_t inDay = weekday(ts) - 1;
       int16_t tmpSnoozeHour = snoozeHour;
-
+      if (tmpSnoozeHour == 0) {
+        tmpSnoozeHour = 24; // correct from 0-23 to 1-24 format (should not be needed)
+      }
+      
       // Is the alarm set for today and does it happen in the future?
       if (alarmDays & (1 << inDay)) { // yes
         if ((tmpSnoozeHour > inHour) || ((tmpSnoozeHour == inHour) && (snoozeMinute > inMinutes))) { // The alarm is in the future
           int32_t alarmSecs = (tmpSnoozeHour * 3600) + (snoozeMinute * 60);
           int32_t calcInSeconds = (inHour * 3600) + (inMinutes * 60) + inSeconds;
-          //Serial.println("secondsToAlarm: time remaining: " + String(alarmSecs - calcInSeconds));
-          //Serial.println(" ");
+          Serial.println("secondsToAlarm: time remaining: " + String(alarmSecs - calcInSeconds));
+          Serial.println(" ");
           return alarmSecs - calcInSeconds;
         }
       }
@@ -258,6 +270,7 @@ class alarmData {
     void snooze (void) {
       snoozeMinute += SNOOZE_TIME;
       snoozecount++;
+      if (snoozecount >=100) { snoozecount = 100; }
 
       if (snoozeMinute > 59) {
         snoozeHour++;
@@ -375,7 +388,7 @@ class alarmData {
       else sunriseActive = true;
     }
 
-    bool isSunriseActive ( void) {
+    bool isSunriseActive ( void ) {
       return sunriseActive;
     }
 };

@@ -55,7 +55,7 @@ class rollingSprite
         c_y = y;
 
         c_spriteValid = false;
-        spr.setColorDepth(8);
+        spr.setColorDepth(16);
         spr.setFreeFont(FSS9);
 
         spr.createSprite(c_sprWidth, c_sprHeight);
@@ -65,10 +65,10 @@ class rollingSprite
         xSemaphoreGive(spriteMutex);
       }
       else {
-        Serial.println("newSprite: Unable to update sprite!");
+        Serial.println("newSprite: Unable to update sprite: "  + c_spriteMsg);
       }
 
-      if (xSemaphoreTake(spriteMutex, (TickType_t) 30) == pdTRUE ) {
+      if (xSemaphoreTake(spriteMutex, (TickType_t) 40) == pdTRUE ) {
         c_txtWidth = spr.textWidth(c_spriteMsg, GFXFF);
         c_spriteACount = 0;
         c_spriteBCount = c_scrollGap + c_txtWidth;
@@ -77,7 +77,7 @@ class rollingSprite
         return true;
       }
       else {
-        Serial.println("newSprite: Unable to update sprite!");
+        Serial.println("newSprite: Unable to update sprite: "  + c_spriteMsg);
       }
       return false;
     }
@@ -95,7 +95,7 @@ class rollingSprite
           xSemaphoreGive(spriteMutex);
         }
         else {
-          Serial.print("delSprite: Unable to delete sprite!!!");
+          Serial.print("delSprite: Unable to delete sprite: "  + c_spriteMsg);
           return false;
         }
       }
@@ -115,7 +115,7 @@ class rollingSprite
           xSemaphoreGive(spriteMutex);
         }
         else {
-          Serial.println("drawSprite: Unable to update sprite!");
+          Serial.println("drawSprite: Unable to update sprite: " + c_spriteMsg);
         }
 
         if (xSemaphoreTake(spriteMutex, (TickType_t) 5) == pdTRUE ) {
@@ -128,7 +128,7 @@ class rollingSprite
           xSemaphoreGive(spriteMutex);
         }
         else {
-          Serial.println("drawSprite: Unable to reset sprite counts!");
+          Serial.println("drawSprite: Unable to reset sprite counts: " + c_spriteMsg);
         }
 
         if (xSemaphoreTake(tftMutex, (TickType_t) 40 / portTICK_PERIOD_MS) == pdTRUE ) {
@@ -136,7 +136,7 @@ class rollingSprite
           xSemaphoreGive(tftMutex);
         }
         else {
-          Serial.println("drawSprite: Unable to push sprite!");
+          Serial.println("drawSprite: Unable to push sprite: " + c_spriteMsg);
           return false;
         }
       }

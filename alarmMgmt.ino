@@ -6,8 +6,8 @@
 #include "AudioGeneratorWAV.h"
 #include "AudioOutputI2S.h"
 
-
-#define ALARM_OFF_BUTTON 35
+// #define ALARM_OFF_BUTTON 35
+#define ALARM_OFF_BUTTON 39
 #define VOLUME_POT 36
 
 #define LRCLK_PIN 26
@@ -79,7 +79,7 @@ void ringAlarm( uint8_t alarmNum ) {
     if (snoozeAdjust > 0.8) snoozeAdjust = 0.8;
     float volumeIn =  (((float)analogRead(VOLUME_POT) / 1900.0) ) + 0.3 + snoozeAdjust; // allow up to a 2.46 amplification, with a minimum of 0.3 + snoozeAdjust
     out->SetGain(volumeIn);
-    
+
     if (xSemaphoreTake(ledMutex, (TickType_t) 5) == pdTRUE ) {
       if (ts - alarmStartTime > MAX_ALARM_TIME) { // Turn off the alarm after the maximum allowable time
         Serial.println("ringAlarm: " + workAlarm->getAlarmID() + " has timed out. Stopping alarm audio.");
@@ -199,10 +199,15 @@ void alarmMgr( void * parameter ) {
     }
 
     bool buttonState = digitalRead(ALARM_OFF_BUTTON);
+
+    if (buttonState == LOW) {
+      disp.resetlastTouch(); // backlight dimming
+    }
+
     if ((alarm1.isSnoozed() || alarm2.isSnoozed() || alarm3.isSnoozed()) && buttonState == LOW && buttonDownTime == 0) {
       buttonDownTime = millis();
       Serial.println("alarmMgr: Saw Alarm Off button.");
-      disp.resetlastTouch(); // backlight dimming
+      //disp.resetlastTouch(); // backlight dimming
     }
 
     if (buttonDownTime != 0) {

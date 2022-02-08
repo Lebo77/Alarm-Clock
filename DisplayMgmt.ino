@@ -72,7 +72,8 @@ void dispMgr( void * parameter) {
     ESP.restart();
   }
 
-  drawTextString("Waiting for Time Sync.", tft.width() / 2, tft.height() / 2, FSSB12, 320, MC_DATUM, TFT_WHITE, TFT_BLACK);
+  drawTextString("Waiting for Time Sync.", tft.width() / 2, (tft.height() / 2) + 30, FSSB12, 320, MC_DATUM, TFT_WHITE, TFT_BLACK);
+  drawTextString("Data by OpenWeather", tft.width() / 2, (tft.height() / 2) - 30 , FSSB12, 320, MC_DATUM, TFT_WHITE, TFT_BLACK);
 
   while (timeStatus() != timeSet) {
     vTaskDelay(500 / portTICK_PERIOD_MS);
@@ -98,6 +99,7 @@ void dispMgr( void * parameter) {
     if (disp.getFullReDraw() || lastMode != disp.getCurrentMode()) {
       sprite1.delSprite();
       sprite2.delSprite();
+      sprite3.delSprite();
       if (disp.getFullReDraw()) {
         drawTime(ts, true);
       }
@@ -108,11 +110,14 @@ void dispMgr( void * parameter) {
       if (disp.getCurrentMode() == MAIN_MODE) {
         drawWeatherDisplay(true);
       }
-      else if (disp.getCurrentMode() == CURRENT_WEATHER_MODE) {
+      else if (disp.getCurrentMode() == CURRENT_WX_MODE) {
         drawCurrentWeatherDisplay(true);
       }
-      else if (disp.getCurrentMode() == FORECAST_MODE) {
+      else if (disp.getCurrentMode() == FORECAST_WX_MODE) {
         drawForecastWeatherDisplay(true);
+      }
+      else if (disp.getCurrentMode() == HOURLY_WX_MODE) {
+        drawHourlyWeatherDisplay(true);
       }
       else if (disp.getCurrentMode() == ALARM_DISPLAY_MODE) {
         drawAlarmDisplay(true);
@@ -135,15 +140,17 @@ void dispMgr( void * parameter) {
     if (disp.getDrawLowerScreen()) {
       disp.setDrawLowerScreen(false);
       disp.setSpriteEnable(false);
-      // vTaskDelay(1 / portTICK_RATE_MS); // Delay a milisec to allow the weather system to catch up
       if (disp.getCurrentMode() == MAIN_MODE) {
         drawWeatherDisplay(false);
       }
-      else if (disp.getCurrentMode() == CURRENT_WEATHER_MODE) {
+      else if (disp.getCurrentMode() == CURRENT_WX_MODE) {
         drawCurrentWeatherDisplay(false);
       }
-      else if (disp.getCurrentMode() == FORECAST_MODE) {
+      else if (disp.getCurrentMode() == FORECAST_WX_MODE) {
         drawForecastWeatherDisplay(false);
+      }
+      else if (disp.getCurrentMode() == HOURLY_WX_MODE) {
+        drawHourlyWeatherDisplay(false);
       }
       else if (disp.getCurrentMode() == ALARM_DISPLAY_MODE) {
         drawAlarmDisplay(false);
@@ -160,12 +167,10 @@ void dispMgr( void * parameter) {
     if (esp_task_wdt_reset() != ESP_OK) {
       Serial.println("Unable to reset displayMgr taskWDT!");
     }
-
     if (disp.getDrawTimeSection()) {
       disp.setDrawTimeSection(false);
       drawTime(now(), false);
     }
-
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
   }
 }
@@ -226,16 +231,16 @@ void drawTime(time_t ts, bool repaint)
       xSemaphoreGive(tftMutex);
     }
     else {
-      Serial.print("drawTime: Unable to run inital screen setup. Try again next time.");
+      Serial.println("drawTime: Unable to run inital screen setup. Try again next time.");
     }
   }
 
   Serial.println("drawTime: Time Redraw. - " + hours);
 
-  if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+  if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
+    tft.setFreeFont(FSSB24);
     padding = tft.textWidth(" 99:99 PM ", GFXFF);
     tft.setTextPadding(padding);
-    tft.setFreeFont(FSSB24);
     tft.setTextDatum(C_BASELINE); // Centre text on x,y position
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.drawString(hours, xpos, timeVertPos, GFXFF);
@@ -257,7 +262,7 @@ void drawTime(time_t ts, bool repaint)
       xSemaphoreGive(tftMutex);
     }
     else {
-      Serial.print("drawTime: Unable to draw date to display. unable to obtain Mutex");
+      Serial.println("drawTime: Unable to draw date to display. unable to obtain Mutex");
     }
   }
 
@@ -267,6 +272,7 @@ void drawTime(time_t ts, bool repaint)
     drawWiFiStatus(disp.getCurrWiFiStatus());
   }
 
+  tft.setTextPadding(0);
   drawAlarmIndicator(repaint);
 
   drawReadingLightButton(repaint);
@@ -470,8 +476,10 @@ void drawWeatherDisplay(bool repaint) {
   static String lastHumid;
   static String lastPercip;
   static String lastCurrMsg;
+  static String lastMainPgMessage;
   static String lastIcon = " ";
   bool redrawCurrStat = false;
+  static uint32_t lastOwAPICalls;
 
   if (hour() < 14 || hour() == 24) { // After 2pm show tomorrow's forcast
     showTomorrow = 0;
@@ -494,18 +502,16 @@ void drawWeatherDisplay(bool repaint) {
 
   // Draw the weather icon and text
   if (disp.getWeatherValid() == true) {
-    if (xSemaphoreTake(dswMutex, (TickType_t) 50) != pdTRUE ) {
+    if (xSemaphoreTake(owMutex, (TickType_t) 200) != pdTRUE ) {
       Serial.println("drawWeatherDisplay: Unable to get dfwMutex to update weather display!");
       return;
     }
 
     String weatherIcon = "";
-    String currentSummary = current->summary;
+    String currentSummary = current->main;
     currentSummary.toLowerCase();
-    if (currentSummary.indexOf("light rain") >= 0 && (current->icon == ICON_RAIN)) weatherIcon = "lightRain";
-    else if (currentSummary.indexOf("drizzle") >= 0 && (current->icon == ICON_RAIN)) weatherIcon = "drizzle";
-    else weatherIcon = getMeteoconIcon(current->icon);
 
+    weatherIcon = getMeteoconIcon(current->id, true, 0);
     if (weatherIcon != lastIcon || repaint) { // save some work drawing the weather icon
       if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
         drawWeatherIcon(weatherIcon, 12, 105, true);
@@ -518,11 +524,12 @@ void drawWeatherDisplay(bool repaint) {
       }
     }
 
-    drawTextString("Currently", 62, 90, FSS9, 124, TC_DATUM, TFT_GREEN, TFT_BLACK);
+    drawTextString("Currently", 62, 90, FSS9, 124, TC_DATUM, TFT_YELLOW, TFT_BLACK);
 
-    msgTmp = String(current->summary) + ", " + String((int)round(current->temperature)) + "F";
+    msgTmp = String(current->description) + ", " + String((int)round(current->temp)) + " F";
+    msgTmp[0] = msgTmp[0] - 32; // upper case 1st letter
     lineLength = tft.textWidth(msgTmp, GFXFF);
-    if (msgTmp != lastCurrMsg || repaint || redrawCurrStat || (int)round(current->temperature) != lastCurTemp) {
+    if (msgTmp != lastCurrMsg || repaint || redrawCurrStat || (int)round(current->temp) != lastCurTemp) {
       redrawCurrStat = false;
       lastCurrMsg = msgTmp;
       sprite1.delSprite();
@@ -531,23 +538,29 @@ void drawWeatherDisplay(bool repaint) {
         xSemaphoreGive(tftMutex);
       }
       if (lineLength >= 115) {
-        sprite1.newSprite(msgTmp, 20, 115, 2, 20, TFT_GREEN, 5, 205);
+        sprite1.newSprite(msgTmp, 20, 115, 2, 20, TFT_YELLOW, 5, 205);
       }
       else {
-        drawTextString(msgTmp, 62, 205, FSS9, 124, TC_DATUM, TFT_GREEN, TFT_BLACK);
+        drawTextString(msgTmp, 62, 205, FSS9, 124, TC_DATUM, TFT_YELLOW, TFT_BLACK);
       }
     }
 
     if (showTomorrow == 1) {
-      drawTextString("Tomorrow's Forecast", 140, 90, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
+      drawTextString("Tomorrow's Forecast", 135, 90, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
     }
     else {
-      drawTextString("Today's Forecast", 140, 90, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
+      drawTextString("Today's Forecast", 135, 90, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
     }
 
-    drawTextString("Powered by Dark Sky", 140, 215, FSS9, 194, TL_DATUM, TFT_DARKGREY, TFT_BLACK);
+    if (disp.getMainPgMessage() != lastMainPgMessage || repaint || lastOwAPICalls != OwAPICalls) {
+      drawTextString(disp.getMainPgMessage(), 135, 215, FSS9, 194, TL_DATUM, disp.getMainPgMessageColor(), TFT_BLACK);
+      lastMainPgMessage = disp.getMainPgMessage();
+      lastOwAPICalls = OwAPICalls;
+    }
 
-    msgTmp = String(daily->summary[showTomorrow]);
+
+    msgTmp = String(daily->description[showTomorrow]);
+    msgTmp[0] = msgTmp[0] - 32; // upper case 1st letter
     lineLength = tft.textWidth(msgTmp, GFXFF);
     if (msgTmp != sprite2.currMsg() || repaint) {
       sprite2.delSprite();
@@ -556,37 +569,38 @@ void drawWeatherDisplay(bool repaint) {
         xSemaphoreGive(tftMutex);
       }
       if (lineLength >= 185) {
-        sprite2.newSprite(msgTmp, 20, 180, 2, 30, TFT_YELLOW, 140, 112);
+        sprite2.newSprite(msgTmp, 20, 180, 2, 30, TFT_YELLOW, 135, 112);
       }
       else {
-        drawTextString(msgTmp, 140, 112, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
+        drawTextString(msgTmp, 135, 112, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
       }
     }
 
-    msgTmp = "High: " + String((int)round(daily->temperatureHigh[showTomorrow])) + " F";
+    msgTmp = "Temp:  " + String((int)round(daily->temp_morn[showTomorrow])) + "-" + String((int)round(daily->temp_day[showTomorrow])) + "-" + String((int)round(daily->temp_eve[showTomorrow])) + "-" + String((int)round(daily->temp_night[showTomorrow])) + " F";
     if (lastHighTemp != msgTmp || repaint) {
-      drawTextString(msgTmp, 140, 135, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
+      drawTextString(msgTmp, 135, 135, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
       lastHighTemp = msgTmp;
     }
 
-    msgTmp = "Low: " + String((int)round(daily->temperatureLow[showTomorrow])) + " F";
+    msgTmp = "Feels:  " + String((int)round(daily->feels_like_morn[showTomorrow])) + "-" + String((int)round(daily->feels_like_day[showTomorrow])) + "-" + String((int)round(daily->feels_like_eve[showTomorrow])) + "-" + String((int)round(daily->feels_like_night[showTomorrow])) + " F";
     if (lastLowTemp != msgTmp || repaint) {
-      drawTextString(msgTmp, 140, 155, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
+      drawTextString(msgTmp, 135, 155, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
       lastLowTemp = msgTmp;
     }
 
-    msgTmp = formatPrecipString(daily->precipType[showTomorrow], daily->precipProbability[showTomorrow], daily->precipIntensity[showTomorrow]);
+    msgTmp = formatPrecipString(daily->pop[showTomorrow], daily->rain[showTomorrow], daily->snow[showTomorrow]);
     if (lastPercip != msgTmp || repaint) {
-      drawTextString(msgTmp, 140, 175, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
+      drawTextString(msgTmp, 135, 175, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
       lastPercip = msgTmp;
     }
 
+
     msgTmp = "Humidity: " + String(daily->humidity[showTomorrow]) + "%";
     if (lastHumid != msgTmp || repaint) {
-      drawTextString(msgTmp, 140, 195, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
+      drawTextString(msgTmp, 135, 195, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
       lastHumid = msgTmp;
     }
-    xSemaphoreGive(dswMutex);
+    xSemaphoreGive(owMutex);
   }
   else
   {
@@ -595,6 +609,7 @@ void drawWeatherDisplay(bool repaint) {
     // turn off the sprites if the weather is invalid
     sprite1.delSprite();
     sprite2.delSprite();
+    sprite3.delSprite();
 
     if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {// clear the forecastSprite
       tft.fillRect(130, 115, 190 , 20, TFT_BLACK);
@@ -605,6 +620,11 @@ void drawWeatherDisplay(bool repaint) {
       xSemaphoreGive(tftMutex);
     }
     drawTextString("Wating for Weather...", 149, 90, FSS9, 194, TL_DATUM, TFT_YELLOW, TFT_BLACK);
+
+    if (disp.getMainPgMessage() != lastMainPgMessage || repaint) {
+      drawTextString(disp.getMainPgMessage(), 135, 215, FSS9, 194, TL_DATUM, disp.getMainPgMessageColor(), TFT_BLACK);
+      lastMainPgMessage = disp.getMainPgMessage();
+    }
   }
 }
 
@@ -615,7 +635,7 @@ void drawCurrentWeatherDisplay(bool repaint) {
   String msgTmp;
   int lineLength;
   static int lastCurTemp;
-  static String lastPercip;
+  static String lastFeels;
   static String lastCurrMsg;
   static String lastHumid;
   static String lastPress;
@@ -623,56 +643,52 @@ void drawCurrentWeatherDisplay(bool repaint) {
   static String lastIcon = " ";
 
   if (disp.getWeatherValid() == true) {
-    if (xSemaphoreTake(dswMutex, (TickType_t) 100) != pdTRUE ) {
+    if (xSemaphoreTake(owMutex, (TickType_t) 100) != pdTRUE ) {
       Serial.println("drawWeatherDisplay: Unable to get dfwMutex to update weather display!");
       return;
     }
 
-    /*
-        // Set text paramiters for this section
-        tft.setFreeFont(FSS9);
-        tft.setTextDatum(TC_DATUM);
-        tft.setTextColor(TFT_GREEN, TFT_BLACK);
-        tft.setTextPadding(310);
-    */
     if (repaint) {
-      drawTextString("Current Weather", tft.width() / 2, 90, FSS9, 310, TC_DATUM, TFT_GREEN, TFT_BLACK);
+      drawTextString("Current Weather - 1/2", tft.width() / 2, 90, FSS9, 310, TC_DATUM, TFT_YELLOW, TFT_BLACK);
     }
 
     // draw weather text
-    msgTmp = "Summary: " + String(current->summary);
+    msgTmp = String(current->description);
+    msgTmp[0] = msgTmp[0] - 32; // upper case 1st letter
+    msgTmp = "Summary: " + msgTmp;
     // lineLength = tft.textWidth(msgTmp, GFXFF);
     if (msgTmp != lastCurrMsg || repaint ) {
       lastCurrMsg = msgTmp;
-      drawTextString(msgTmp, 5, 110, FSS9, 310, TL_DATUM, TFT_GREEN, TFT_BLACK);
+      drawTextString(msgTmp, 5, 110, FSS9, 310, TL_DATUM, TFT_YELLOW, TFT_BLACK);
     }
 
-    msgTmp = formatPrecipString(current->precipType, current->precipProbability, current->precipIntensity) + " - " + String(current->precipProbability) + "%";
-    if (lastPercip != msgTmp || repaint) {
-      drawTextString(msgTmp, 5, 130, FSS9, 310, TL_DATUM, TFT_GREEN, TFT_BLACK);
-      lastPercip = msgTmp;
-    }
-
-    msgTmp = "Temprature: " + String(current->temperature) + " F";
+    msgTmp = "Temprature: " + String(current->temp) + " F";
     // lineLength = tft.textWidth(msgTmp, GFXFF);
     if (msgTmp != lastCurrMsg || repaint ) {
       lastCurrMsg = msgTmp;
-      drawTextString(msgTmp, 5, 150, FSS9, 310, TL_DATUM, TFT_GREEN, TFT_BLACK);
+      drawTextString(msgTmp, 5, 130, FSS9, 310, TL_DATUM, TFT_YELLOW, TFT_BLACK);
     }
 
-    msgTmp = "Humidity: " + String(current->humidity) + "%";
+    msgTmp = "Feels Like: " + String(current->feels_like) + " F";
+    // lineLength = tft.textWidth(msgTmp, GFXFF);
+    if (msgTmp != lastFeels || repaint ) {
+      lastFeels = msgTmp;
+      drawTextString(msgTmp, 5, 150, FSS9, 310, TL_DATUM, TFT_YELLOW, TFT_BLACK);
+    }
+
+    msgTmp = "Humidity: " + String(current->humidity) + "%  Clouds: " + String(current->clouds) + "%";
     if (lastHumid != msgTmp || repaint) {
-      drawTextString(msgTmp, 5, 170, FSS9, 310, TL_DATUM, TFT_GREEN, TFT_BLACK);
+      drawTextString(msgTmp, 5, 170, FSS9, 310, TL_DATUM, TFT_YELLOW, TFT_BLACK);
       lastHumid = msgTmp;
     }
 
-    msgTmp = "Presure: " + String(current->pressure) + "mb";
+    msgTmp = "Presure: " + String(current->pressure) + " mBar";
     if (lastPress != msgTmp || repaint) {
-      drawTextString(msgTmp, 5, 190, FSS9, 310, TL_DATUM, TFT_GREEN, TFT_BLACK);
+      drawTextString(msgTmp, 5, 190, FSS9, 310, TL_DATUM, TFT_YELLOW, TFT_BLACK);
       lastPress = msgTmp;
     }
 
-    msgTmp = formatWindString(current->windSpeed, current->windGust, current->windBearing);
+    msgTmp = formatWindString(current->wind_speed, current->wind_gust, current->wind_deg);
     //msgTmp = "I am the test case, and this is WAY too long to fit in the availible space.";
     lineLength = tft.textWidth(msgTmp, GFXFF);
     if (msgTmp != sprite1.currMsg() || repaint) {
@@ -682,17 +698,134 @@ void drawCurrentWeatherDisplay(bool repaint) {
         xSemaphoreGive(tftMutex);
       }
       if (lineLength >= 310) {
-        sprite1.newSprite(msgTmp, 20, 310, 2, 30, TFT_GREEN, 5, 210);
+        sprite1.newSprite(msgTmp, 20, 310, 2, 30, TFT_YELLOW, 5, 210);
       }
       else {
-        drawTextString(msgTmp, 5, 210, FSS9, 310, TL_DATUM, TFT_GREEN, TFT_BLACK);
+        drawTextString(msgTmp, 5, 210, FSS9, 310, TL_DATUM, TFT_YELLOW, TFT_BLACK);
       }
     }
 
-    xSemaphoreGive(dswMutex);
+    xSemaphoreGive(owMutex);
   }
   else {
-    drawTextString("Waiting for Weather Data...", tft.width() / 2, 90, FSS9, 310, TC_DATUM, TFT_GREEN, TFT_BLACK);
+    drawTextString("Waiting for Weather Data...", tft.width() / 2, 90, FSS9, 310, TC_DATUM, TFT_YELLOW, TFT_BLACK);
+  }
+}
+
+//===================================================================
+//================= Draw Hourly Weather =============================
+//===================================================================
+void drawHourlyWeatherDisplay(bool repaint) {
+  String msgTmp;
+  int lineLength;
+  int hourCounter;
+  static String lastTemp[3];
+  static String lastDesc[3];
+  static String lastWind[3];
+  static String lastIcon[3] = (" ", " ", " ");
+  uint8_t tmpHour;
+  static uint8_t lastHours[3] = {0};
+  time_t ts = now();
+
+  if (minute(ts) < 20) {
+    hourCounter = 1;
+  }
+  else {
+    hourCounter = 2;
+  }
+
+  if (disp.getWeatherValid() == true) {
+    if (xSemaphoreTake(owMutex, (TickType_t) 100) != pdTRUE ) {
+      Serial.println("drawWeatherDisplay: Unable to get dfwMutex to update weather display!");
+      return;
+    }
+
+    if (repaint) {
+      if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
+        tft.drawFastHLine(0, 110, tft.width(), TFT_WHITE);
+        tft.drawFastVLine(107, 110, tft.height(), TFT_WHITE);
+        tft.drawFastVLine(214, 110, tft.height(), TFT_WHITE);
+        xSemaphoreGive(tftMutex);
+      }
+      // draw weather text
+      msgTmp = "Hourly Forcast - 2/2";
+      drawTextString(msgTmp, tft.width() / 2, 90, FSS9, 320, TC_DATUM, TFT_YELLOW, TFT_BLACK);
+    }
+
+    for (int i = 0; i <  3; i++) {
+      tmpHour = hour(ts + (hourCounter * 3600));
+      if (lastHours[i] != tmpHour || repaint) {
+        msgTmp = assembleHourlyTimeStr(ts + (hourCounter * 3600));
+        drawTextString(msgTmp, 53 + (107 * i), 115, FSS9, 103, TC_DATUM, TFT_YELLOW, TFT_BLACK);
+        lastHours[i] = tmpHour;
+      }
+
+      String weatherIcon = "";
+      String dailySummary = hourly->main[hourCounter];
+      dailySummary.toLowerCase();
+
+      weatherIcon = getMeteoconIcon(hourly->id[hourCounter], false, hourCounter);
+      if (weatherIcon != lastIcon[i] || repaint) { // save some work drawing the weather icon
+        if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
+          drawWeatherIcon(weatherIcon, 28 + (107 * i), 135, false);
+          xSemaphoreGive(tftMutex);
+          lastIcon[i] = weatherIcon;
+        }
+        else {
+          Serial.println("drawWeatherDisplay: Unable to push new weather icon.");
+        }
+      }
+
+      msgTmp = String((int)round(hourly->temp[hourCounter])) + " F";
+      if (lastTemp[i] != msgTmp || repaint) {
+        drawTextString(msgTmp, 53 + (107 * i), 185, FSS9, 103, TC_DATUM, TFT_YELLOW, TFT_BLACK);
+        lastTemp[i] = msgTmp;
+      }
+
+      // Set workSprite to point to the right rolling sprite object should have used an array, but too late now
+      rollingSprite *workSprite;
+      if (i == 0) {
+        workSprite = &sprite1;
+      }
+      else if (i == 1) {
+        workSprite = &sprite2;
+      }
+      else if (i == 2) {
+        workSprite = &sprite3;
+      }
+
+      msgTmp = String(hourly->description[hourCounter]);
+      // msgTmp = "this is a test of the system";
+      msgTmp[0] = msgTmp[0] - 32; // upper case 1st letter
+      lineLength = tft.textWidth(msgTmp, GFXFF);
+      if (msgTmp != lastDesc[i] || repaint) {
+        workSprite->delSprite();
+        if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+          tft.fillRect((107 * i) + 1, 202, 106 , 222, TFT_BLACK);
+          xSemaphoreGive(tftMutex);
+        }
+        if (lineLength >= 100) {
+          workSprite->newSprite(msgTmp, 20, 95, 2, 30, TFT_YELLOW, (107 * i) + 6, 202);
+        }
+        else {
+          drawTextString(msgTmp, 53 + (107 * i), 202, FSS9, 103, TC_DATUM, TFT_YELLOW, TFT_BLACK);
+        }
+
+        lastDesc[i] = msgTmp;
+      }
+
+      msgTmp = String(int(round(hourly->wind_speed[hourCounter]))) + "/" + String(int(round(hourly->wind_gust[hourCounter]))) + "mph";
+      if (lastWind[i] != msgTmp || repaint) {
+        drawTextString(msgTmp, 53 + (107 * i), 222, FSS9, 103, TC_DATUM, TFT_YELLOW, TFT_BLACK);
+        lastWind[i] = msgTmp;
+      }
+
+      hourCounter++;
+    }
+    xSemaphoreGive(owMutex);
+  }
+  else {
+    drawTextString("Waiting for Weather Data...", tft.width() / 2, 90, FSS9, 320, TC_DATUM, TFT_YELLOW, TFT_BLACK);
   }
 }
 
@@ -703,8 +836,9 @@ void drawForecastWeatherDisplay(bool repaint) {
   String msgTmp;
   int lineLength;
   int dayCounter;
-  static String lastHighTemp;
-  static String lastLowTemp;
+  static String lastTemp[3];
+  static String lastDesc[3];
+  static String lastWind[3];
   static String lastIcon[3] = (" ", " ", " ");
   uint8_t tmpDay;
   static uint8_t lastDays[3] = {0};
@@ -718,55 +852,39 @@ void drawForecastWeatherDisplay(bool repaint) {
   }
 
   if (disp.getWeatherValid() == true) {
-    if (xSemaphoreTake(dswMutex, (TickType_t) 100) != pdTRUE ) {
+    if (xSemaphoreTake(owMutex, (TickType_t) 100) != pdTRUE ) {
       Serial.println("drawWeatherDisplay: Unable to get dfwMutex to update weather display!");
       return;
     }
 
     if (repaint) {
-      if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+      if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
         tft.drawFastHLine(0, 110, tft.width(), TFT_WHITE);
-        tft.drawFastVLine(tft.width() / 3, 110, tft.height(), TFT_WHITE);
-        tft.drawFastVLine(2 * tft.width() / 3, 110, tft.height(), TFT_WHITE);
+        tft.drawFastVLine(107, 110, tft.height(), TFT_WHITE);
+        tft.drawFastVLine(214, 110, tft.height(), TFT_WHITE);
         xSemaphoreGive(tftMutex);
       }
     }
 
     // draw weather text
-    msgTmp = "Forecast: " + String(daily->overallSummary);
-    //msgTmp = "I am the test case, and this is WAY too long to fit in the availible space.";
-    lineLength = tft.textWidth(msgTmp, GFXFF);
-    if (msgTmp != sprite1.currMsg() || repaint) {
-      sprite1.delSprite();
-      if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
-        tft.fillRect(5, 90, 310, 20, TFT_BLACK);
-        xSemaphoreGive(tftMutex);
-      }
-      if (lineLength >= 310) {
-        sprite1.newSprite(msgTmp, 20, 310, 2, 30, TFT_YELLOW, 5, 90);
-      }
-      else {
-        drawTextString(msgTmp, tft.width() / 2, 90, FSS9, 320, TC_DATUM, TFT_YELLOW, TFT_BLACK);
-      }
-    }
+    msgTmp = "3-day Forecast";
+    drawTextString(msgTmp, tft.width() / 2, 90, FSS9, 320, TC_DATUM, TFT_YELLOW, TFT_BLACK);
 
     for (int i = 0; i <  3; i++) {
       tmpDay = weekday(ts + (dayCounter * SECONDS_IN_DAY));
       if (lastDays[i] != tmpDay || repaint) {
         msgTmp = getDayOfWeek(weekday(ts + (dayCounter * SECONDS_IN_DAY)));
-        drawTextString(msgTmp, 52 + (107 * i), 115, FSS9, 105, TC_DATUM, TFT_YELLOW, TFT_BLACK);
+        drawTextString(msgTmp, 53 + (107 * i), 115, FSS9, 103, TC_DATUM, TFT_YELLOW, TFT_BLACK);
         lastDays[i] = tmpDay;
       }
 
       String weatherIcon = "";
-      String dailySummary = daily->summary[dayCounter];
+      String dailySummary = daily->main[dayCounter];
       dailySummary.toLowerCase();
-      if (dailySummary.indexOf("light rain") >= 0 && (daily->icon[dayCounter] == ICON_RAIN)) weatherIcon = "lightRain";
-      else if (dailySummary.indexOf("drizzle") >= 0 && (daily->icon[dayCounter] == ICON_RAIN)) weatherIcon = "drizzle";
-      else weatherIcon = getMeteoconIcon(daily->icon[dayCounter]);
 
+      weatherIcon = getMeteoconIcon(daily->id[dayCounter], false, 0);
       if (weatherIcon != lastIcon[i] || repaint) { // save some work drawing the weather icon
-        if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+        if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
           drawWeatherIcon(weatherIcon, 28 + (107 * i), 135, false);
           xSemaphoreGive(tftMutex);
           lastIcon[i] = weatherIcon;
@@ -776,20 +894,53 @@ void drawForecastWeatherDisplay(bool repaint) {
         }
       }
 
-      msgTmp = "H: " + String((int)round(daily->temperatureHigh[dayCounter])) + " F";
-      if (lastHighTemp != msgTmp || repaint) {
-        drawTextString(msgTmp, 52 + (107 * i), 185, FSS9, 105, TC_DATUM, TFT_YELLOW, TFT_BLACK);
-        lastHighTemp = msgTmp;
+      msgTmp = String((int)round(daily->temp_min[dayCounter])) + "-" + String((int)round(daily->temp_max[dayCounter])) + " F";
+      if (lastTemp[i] != msgTmp || repaint) {
+        drawTextString(msgTmp, 53 + (107 * i), 185, FSS9, 103, TC_DATUM, TFT_YELLOW, TFT_BLACK);
+        lastTemp[i] = msgTmp;
       }
 
-      msgTmp = "L: " + String((int)round(daily->temperatureLow[dayCounter])) + " F";
-      if (lastLowTemp != msgTmp || repaint) {
-        drawTextString(msgTmp, 52 + (107 * i), 205, FSS9, 105, TC_DATUM, TFT_YELLOW, TFT_BLACK);
-        lastLowTemp = msgTmp;
+      rollingSprite *workSprite;
+      if (i == 0) {
+        workSprite = &sprite1;
       }
+      else if (i == 1) {
+        workSprite = &sprite2;
+      }
+      else if (i == 2) {
+        workSprite = &sprite3;
+      }
+
+      // needs work
+      msgTmp = String(daily->description[dayCounter]);
+      // msgTmp = "this is a test of the system";
+      msgTmp[0] = msgTmp[0] - 32; // upper case 1st letter
+      lineLength = tft.textWidth(msgTmp, GFXFF);
+      if (msgTmp != lastDesc[i] || repaint) {
+        workSprite->delSprite();
+        if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+          tft.fillRect((107 * i) + 1, 202, 106 , 222, TFT_BLACK);
+          xSemaphoreGive(tftMutex);
+        }
+        if (lineLength >= 100) {
+          workSprite->newSprite(msgTmp, 20, 95, 2, 30, TFT_YELLOW, (107 * i) + 6, 202);
+        }
+        else {
+          drawTextString(msgTmp, 53 + (107 * i), 202, FSS9, 103, TC_DATUM, TFT_YELLOW, TFT_BLACK);
+        }
+
+        lastDesc[i] = msgTmp;
+      }
+
+      msgTmp = String(int(round(daily->wind_speed[dayCounter]))) + "/" + String(int(round(daily->wind_gust[dayCounter]))) + "mph";
+      if (lastWind[i] != msgTmp || repaint) {
+        drawTextString(msgTmp, 53 + (107 * i), 222, FSS9, 103, TC_DATUM, TFT_YELLOW, TFT_BLACK);
+        lastWind[i] = msgTmp;
+      }
+
       dayCounter++;
     }
-    xSemaphoreGive(dswMutex);
+    xSemaphoreGive(owMutex);
   }
   else {
     drawTextString("Waiting for Weather Data...", tft.width() / 2, 90, FSS9, 320, TC_DATUM, TFT_YELLOW, TFT_BLACK);
@@ -862,7 +1013,7 @@ void drawAlarmDisplayElem(bool repaint, uint8_t alarmNumber, uint16_t yOff) {
   }
 
   if (repaint) {
-    if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+    if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
       tft.drawFastHLine(0, yOff, tft.width(), TFT_WHITE);
       xSemaphoreGive(tftMutex);
     }
@@ -881,12 +1032,13 @@ void drawAlarmDisplayElem(bool repaint, uint8_t alarmNumber, uint16_t yOff) {
     drawTextString(tmpString, 84, yOff + 14, FSS9, 165, TL_DATUM, TFT_WHITE, TFT_BLACK);
   }
 
-  if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+  tft.setTextPadding(0);
+  if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
     workAlarm->button.drawButton();
     xSemaphoreGive(tftMutex);
   }
 
-  if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+  if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
     workAlarm->dawnButton.drawButton(false);
     xSemaphoreGive(tftMutex);
   }
@@ -899,7 +1051,7 @@ void drawAlarmDisplayElem(bool repaint, uint8_t alarmNumber, uint16_t yOff) {
   }
 
   alarmIcon.toCharArray(iconChar, 31);
-  if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+  if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
     drawBmp(iconChar, 293, yOff + 12);
     xSemaphoreGive(tftMutex);
   }
@@ -915,7 +1067,7 @@ void drawAlarmDisplayElem(bool repaint, uint8_t alarmNumber, uint16_t yOff) {
   }
 
   lightIcon.toCharArray(iconChar, 31);
-  if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+  if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
     drawBmp(iconChar, 250, yOff + 7);
     xSemaphoreGive(tftMutex);
   }
@@ -939,7 +1091,6 @@ void drawAlarmSetDisplay(bool repaint, int alarmNumber) {
   String tmpMsg;
 
   char * shortDow[] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
-
 
   // set up the pointer to the alarm we are working on
   alarmData *workAlarm;
@@ -971,6 +1122,7 @@ void drawAlarmSetDisplay(bool repaint, int alarmNumber) {
     drawTextString(tmpMsg, tft.width() / 2, 152, FSSB24, 216, C_BASELINE, TFT_WHITE, TFT_BLACK);
     lastAlarmTime[alarmNumber - 1] = tmpMsg;
 
+    tft.setTextPadding(0);
     if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
       tft.setFreeFont(FSSB12);
       hoursUp.drawButton();
@@ -1054,10 +1206,13 @@ void drawLightSetDisplay(bool repaint) {
     sUpButton.initButton(&tft, 200, 135, button_width, button_height, TFT_WHITE, TFT_LIGHTGREY, TFT_BLACK, "S+", 1);
     sDownButton.initButton(&tft, 200, 220, button_width, button_height, TFT_WHITE, TFT_LIGHTGREY, TFT_BLACK, "S-", 1);
 
-    tft.drawFastHLine(0, 110, 240, TFT_WHITE);
-    tft.drawFastVLine(80, 110, tft.height(), TFT_WHITE);
-    tft.drawFastVLine(160, 110, tft.height(), TFT_WHITE);
-    tft.drawFastVLine(240, 87, tft.height(), TFT_WHITE);
+    if (xSemaphoreTake(tftMutex, (TickType_t) 100) == pdTRUE ) {
+      tft.drawFastHLine(0, 110, 240, TFT_WHITE);
+      tft.drawFastVLine(80, 110, tft.height(), TFT_WHITE);
+      tft.drawFastVLine(160, 110, tft.height(), TFT_WHITE);
+      tft.drawFastVLine(240, 87, tft.height(), TFT_WHITE);
+      xSemaphoreGive(tftMutex);
+    }
 
     roomSubModeButton.initButton(&tft, 280, 115, 66, 40, TFT_WHITE, TFT_BLACK, TFT_WHITE, "Room", 1);
     readSubModeButton.initButton(&tft, 280, 163, 66, 40, TFT_WHITE, TFT_BLACK, TFT_WHITE, "Read", 1);
@@ -1065,7 +1220,8 @@ void drawLightSetDisplay(bool repaint) {
   }
 
   if (curColor.H != lastColor.H || repaint) {
-    if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+    if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
+      tft.setTextPadding(0);
       tft.setFreeFont(FSSB9);
       hUpButton.drawButton();
       hDownButton.drawButton();
@@ -1076,7 +1232,8 @@ void drawLightSetDisplay(bool repaint) {
   }
 
   if (curColor.S != lastColor.S || curColor.S == 0 || curColor.S == 1.0 || repaint) {
-    if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+    if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
+      tft.setTextPadding(0);
       tft.setFreeFont(FSSB9);
       sUpButton.drawButton();
       sDownButton.drawButton();
@@ -1087,7 +1244,8 @@ void drawLightSetDisplay(bool repaint) {
   }
 
   if (curColor.B != lastColor.B || curColor.B == 0.1 || curColor.B == 1.0 || repaint) {
-    if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+    if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
+      tft.setTextPadding(0);
       tft.setFreeFont(FSSB9);
       bUpButton.drawButton();
       bDownButton.drawButton();
@@ -1096,16 +1254,26 @@ void drawLightSetDisplay(bool repaint) {
       drawTextString(String((int)(curColor.B * 100)), 40, 177, FSSB12, 75, MC_DATUM, TFT_WHITE, TFT_BLACK);
     }
   }
-  lastColor = curColor;
 
   if (repaint || disp.getLightSubMode() != lastSubMode) {
-    if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+    if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
       tft.setFreeFont(FSSB9);
+      tft.setTextPadding(0);
       roomSubModeButton.drawButton(disp.getLightSubMode() == ROOM_LIGHT_SUB_MODE);
       readSubModeButton.drawButton(disp.getLightSubMode() == READ_LIGHT_SUB_MODE);
       nightSubModeButton.drawButton(disp.getLightSubMode() == NIGHT_LIGHT_SUB_MODE);
       xSemaphoreGive(tftMutex);
     }
+  }
+
+  if (disp.getLightSubMode() == READ_LIGHT_SUB_MODE) {
+    lastReadColor = curColor;
+  }
+  else if (disp.getLightSubMode() == ROOM_LIGHT_SUB_MODE) {
+    lastRoomColor = curColor;
+  }
+  else if (disp.getLightSubMode() == NIGHT_LIGHT_SUB_MODE) {
+    lastNightColor = curColor;
   }
 }
 
@@ -1145,7 +1313,7 @@ void drawTextString(String msg, uint16_t x, uint16_t y) {
 
 void drawTextString(String msg, uint16_t x, uint16_t y, const GFXfont * font, uint16_t padding, uint8_t alignment, uint32_t color, uint32_t bg) {
 
-  if (xSemaphoreTake(tftMutex, (TickType_t) 50) == pdTRUE ) {
+  if (xSemaphoreTake(tftMutex, (TickType_t) 100) == pdTRUE ) {
     tft.setFreeFont(font);
     tft.setTextDatum(alignment);
     tft.setTextColor(color, bg);
@@ -1179,7 +1347,7 @@ void drawWeatherIcon(String weatherIcon, int x, int y, bool big)
 //================ Clear the Working Area ===========================
 //===================================================================
 void clearWorkingArea() {
-  if (xSemaphoreTake(tftMutex, (TickType_t) 75) == pdTRUE ) {
+  if (xSemaphoreTake(tftMutex, (TickType_t) 125) == pdTRUE ) {
     tft.fillRect(0, HORIZ_DIV_POS + 2, tft.width(), (tft.height() - (HORIZ_DIV_POS + 2)), TFT_BLACK); // Clear the lower part of the screen
     xSemaphoreGive(tftMutex);
   }
@@ -1227,48 +1395,46 @@ String formatWindString(float windSpeed, float windGust , float windBearing) {
     Serial.println("formatWindString: Invalid Wind direction!: " + String(windBearing));
     compass = "ERROR";
   }
-  msg = "Wind from " + compass + " @ " + String(windSpeed) + "mph";
+  msg = "Wind from " + compass + " @ " + String(windSpeed) + " mph";
 
   if ((windGust - windSpeed) > 2.0) {
-    msg = msg + " gusting " + String(windGust) + "mph";
+    msg = msg + ", gusting " + String(windGust) + " mph";
   }
 
   return msg;
 }
 
-String formatPrecipString(int type, int prob, float intensity) {
+// Format a srring that lists in words the liklyhood and type of precipitation
+String formatPrecipString(float prob, float rain, float snow) {
   String output;
-  const float epsilon = 0.001; // a small number
+  const float epsilon = 0.01; // a small number
 
 
-  if (prob == 0 || intensity < epsilon) {
+  if (prob == 0 || (rain < epsilon && snow < epsilon)) {
     output = "No Precipitation";
     return output;
   }
 
-  switch (type)
-  {
-    case 1: output = "Rain "; break;
-    case 2: output = "Sleet "; break;
-    case 3: output = "Snow "; break;
-    default: output = "Precipitation "; break;
+  if      (rain > epsilon && snow < epsilon) {
+    output = "Rain ";
+  }
+  else if (rain < epsilon && snow > epsilon) {
+    output = "Snow ";
+  }
+  else if (rain > epsilon && snow > epsilon) {
+    output = "Sleet ";
   }
 
-  if (output == "Precipitation ") {
-    output = output + prob + "%";
-    return output;
-  }
-
-  if (prob <= 10) {
+  if (prob <= .10) {
     output = output + "very unlikely";
   }
-  else if (prob > 10 && prob <= 25) {
+  else if (prob > .10 && prob <= .25) {
     output = output + "unlikely";
   }
-  else if (prob > 25 && prob <= 75) {
+  else if (prob > .25 && prob <= .75) {
     output = output + "possible";
   }
-  else if (prob > 75 && prob <= 90) {
+  else if (prob > .75 && prob <= .90) {
     output = output + "likely";
   }
   else {
@@ -1278,6 +1444,7 @@ String formatPrecipString(int type, int prob, float intensity) {
   return output;
 }
 
+// Put together the Date from a UNIX time
 String assembleDateStr(time_t ts) {
   String dateString = getDayOfWeek(weekday(ts)) + " ";
   dateString = dateString + getMonthOfYear(month(ts)) + " " + String(day(ts));
@@ -1285,6 +1452,7 @@ String assembleDateStr(time_t ts) {
   return dateString;
 }
 
+// Put together a normal time (AM/PM) from a UNIX time
 String assembleTimeStr(time_t ts) {
   String hours = String(hourFormat12(ts));
   if (minute(ts) < 10)
@@ -1305,6 +1473,20 @@ String assembleTimeStr(time_t ts) {
   return hours;
 }
 
+//Put toghether just the hour plus AM/PM
+String assembleHourlyTimeStr(time_t ts) {
+  String hours = String(hourFormat12(ts));
+
+  if (hour(ts) < 12) {
+    hours = hours + " AM";
+  }
+  else {
+    hours = hours + " PM";
+  }
+  return hours;
+}
+
+// Return the day of the week for a given index
 String getDayOfWeek(int i)
 {
   switch (i)
@@ -1320,6 +1502,7 @@ String getDayOfWeek(int i)
   }
 }
 
+// Return the month for a given index
 String getMonthOfYear(int i)
 {
   switch (i)
@@ -1355,9 +1538,34 @@ const char* wl_status_to_string(wl_status_t status) {
 
 //***************************************************************************************
 //**                          Get the icon file name from the index number
+//**        NOTE: Only one of curWx or hourWx should be True. hourWx should be the offset in the hourly object
 //***************************************************************************************/
-const char* getMeteoconIcon(uint8_t index)
+const String getMeteoconIcon(uint16_t id, bool curWx, uint16_t hourWx)
 {
-  if (index > MAX_ICON_INDEX) index = 0;
-  return dsw.iconName(index);
+  if ( curWx && id / 100 == 8 && (current->dt < current->sunrise || current->dt > current->sunset)) id += 1000;
+  else if ( (hourWx != 0) && id / 100 == 8 && (hourly->dt[hourWx] < current->sunrise || hourly->dt[hourWx] > current->sunset)) id += 1000;
+
+  if (id / 100 == 2) return "thunderstorm";
+  if (id / 100 == 3) return "drizzle";
+  if (id / 100 == 4) return "unknown";
+  if (id == 500 || id == 520) return "lightRain";
+  else if (id == 511) return "sleet";
+  else if (id / 100 == 5) return "rain";
+  if (id == 602 || id == 622) return "heavy-snow";
+  if (id >= 611 && id <= 616) return "sleet";
+  else if (id / 100 == 6) return "snow";
+  if (id >= 701 && id <= 762) return "fog";
+  if (id == 771 || id == 781) return "wind";
+  if (id == 800) return "clear-day";
+  if (id == 801) return "partly-cloudy-day";
+  if (id == 802) return "partly-cloudy-day";
+  if (id == 803) return "cloudy";
+  if (id == 804) return "cloudy";
+  if (id == 1800) return "clear-night";
+  if (id == 1801) return "partly-cloudy-night";
+  if (id == 1802) return "partly-cloudy-night";
+  if (id == 1803) return "cloudy";
+  if (id == 1804) return "cloudy";
+
+  return "unknown";
 }

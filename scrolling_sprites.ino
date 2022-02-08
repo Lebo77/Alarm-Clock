@@ -1,4 +1,4 @@
-// This file hans the code that executes to scroll the sprites
+// This file has the code that executes to scroll the sprites
 
 #include "globalInclude.h"
 
@@ -10,7 +10,7 @@ void spriteMgr( void * parameter) {
   vTaskDelay(2000 / portTICK_PERIOD_MS); // let the other task get going
 
   if ( esp_task_wdt_add(NULL) != ESP_OK) { // add task to WDT
-    Serial.println("Unable to add spriteMgr to taskWDT!");
+    Serial.println("spriteMgr: Unable to add spriteMgr to taskWDT!");
   }
 
   TickType_t xLastWakeTime;
@@ -26,10 +26,11 @@ void spriteMgr( void * parameter) {
 
       sprite1.drawSprite();
       sprite2.drawSprite();
+      sprite3.drawSprite();
 
     }
     if (esp_task_wdt_reset() != ESP_OK) {
-      Serial.println("Unable to reset spriteMgr taskWDT!");
+      Serial.println("spriteMgr: Unable to reset spriteMgr taskWDT!");
     }
     vTaskDelayUntil( &xLastWakeTime, xFrequency );    // Wait for the next cycle.
   }

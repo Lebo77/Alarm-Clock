@@ -17,11 +17,14 @@ class displayMgr
     volatile uint8_t alarmEdit = 0;
     volatile bool screenTouchActive = false;
     volatile uint8_t lightSubMode = 0;
+    String mainPgMessage = "Data by OpenWeather";
+    //String mainPgMessage = String("OW API Calls: ") + String(OwAPICalls);
+    volatile uint32_t mainPgMessageColor = TFT_DARKGREY;
 
 
-    public:
-      // get/set CurrWiFiStatus
-      void setCurrWiFiStatus (bool value) {
+  public:
+    // get/set CurrWiFiStatus
+    void setCurrWiFiStatus (bool value) {
       currWiFiStatus = value;
     }
     bool getCurrWiFiStatus (void) {
@@ -90,6 +93,22 @@ class displayMgr
     }
     uint8_t getAlarmEdit (void) {
       return alarmEdit;
+    }
+
+    // get/set mainPgMessage
+    void setMainPgMessage (String value) {
+      mainPgMessage = value;
+    }
+    String getMainPgMessage (void) {
+      return mainPgMessage;
+    }
+
+    // get/set mainPgMessageColor
+    void setMainPgMessageColor (uint32_t value) {
+      mainPgMessageColor = value;
+    }
+    uint32_t getMainPgMessageColor (void) {
+      return mainPgMessageColor;
     }
 
     // touchscreen alerts

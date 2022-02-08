@@ -44,7 +44,7 @@ void modeMgr( void * parameter) {
   uint16_t x = 0, y = 0; // To store the touch coordinates
 
   // Set the calibration of the touchscreen
-  uint16_t calData[5] = { 367, 3511, 197, 3648, 1 };
+  uint16_t calData[5] = { 383, 3517, 188, 3657, 1 };
   tft.setTouch(calData);
 
   vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay start to give systems time to come up
@@ -56,28 +56,32 @@ void modeMgr( void * parameter) {
     if ( xSemaphoreTake( touchSemaphore, 200 / portTICK_PERIOD_MS ) == pdTRUE ) // bail out to reset the WDT every 1/5 sec.
     {
       IRQtime = millis();
-      if (xSemaphoreTake(tftMutex, (TickType_t) 130) == pdTRUE ) {
+      //Serial.println("modeMgr: Saw IRQ: " + String(IRQtime));
+      if (xSemaphoreTake(tftMutex, (TickType_t) 150) == pdTRUE ) {
         validTouch = tft.getTouch(&x, &y);
         xSemaphoreGive(tftMutex);
       }
       else {
-        Serial.println("modeMgr: unable to get tftMutex!");
+        Serial.println("modeMgr: unable to get tftMutex to read touchscreen!");
       }
 
-      if (IRQtime - lastIRQTime > 150 && validTouch) { // debounce and check that the tft driver agrees the touch was real
+      if (IRQtime - lastIRQTime > 200 && validTouch) { // debounce and check that the tft driver agrees the touch was real
         lastIRQTime = IRQtime;
-        //Serial.println("modeMgr: Got touch. X: " + String(x) + "   Y: " + String(y));
+        // Serial.println("modeMgr: Got touch. X: " + String(x) + "   Y: " + String(y));
 
         disp.resetlastTouch(); // reset the blacklight dimming
 
         if (disp.getCurrentMode() == MAIN_MODE) {
           touchMainMode(x, y);
         }
-        else if (disp.getCurrentMode() == CURRENT_WEATHER_MODE) {
+        else if (disp.getCurrentMode() == CURRENT_WX_MODE) {
           touchCurWeatherMode(x, y);
         }
-        else if (disp.getCurrentMode() == FORECAST_MODE) {
+        else if (disp.getCurrentMode() == FORECAST_WX_MODE) {
           touchForecastMode(x, y);
+        }
+        else if (disp.getCurrentMode() == HOURLY_WX_MODE) {
+          touchHourWeatherMode(x, y);
         }
         else if (disp.getCurrentMode() == ALARM_DISPLAY_MODE) {
           touchAlarmDispMode(x, y);
@@ -146,12 +150,14 @@ void modeMgr( void * parameter) {
         disp.setScreenTouchActive(false);
       }
 
+
       if ( nightLightButtonCount >= 4 ) {
         nightLightButtonCount = 0;
         disp.setCurrentMode(GEN_LIGHT_CTRL_MODE);
         disp.setLightSubMode(NIGHT_LIGHT_SUB_MODE);
         disp.setScreenTouchActive(false);
       }
+
     }
 
     if (esp_task_wdt_reset() != ESP_OK) {
@@ -188,10 +194,10 @@ void touchMainMode(uint16_t x, uint16_t y) {
     }
   }
   else if (x < VERT_DIV_POS) {
-    disp.setCurrentMode(CURRENT_WEATHER_MODE);
+    disp.setCurrentMode(CURRENT_WX_MODE);
   }
   else {
-    disp.setCurrentMode(FORECAST_MODE);
+    disp.setCurrentMode(FORECAST_WX_MODE);
   }
 }
 
@@ -222,7 +228,38 @@ void touchCurWeatherMode(uint16_t x, uint16_t y) {
     }
   }
   else {
-    disp.setCurrentMode(MAIN_MODE);
+    disp.setCurrentMode(HOURLY_WX_MODE);
+  }
+}
+
+// =============================================
+// ========= Hourly Weather Mode ===============
+// =============================================
+void touchHourWeatherMode(uint16_t x, uint16_t y) {
+  if (y < HORIZ_DIV_POS) {
+    if (readLightButton.contains(x, y)) {
+      ledMaster.readLightToggle();
+      drawReadingLightButton(false);
+      disp.setScreenTouchActive(true);
+    }
+    else if (roomLightButton.contains(x, y)) {
+      ledMaster.roomLightToggle();
+      drawRoomLightButton(false);
+      drawNightLightButton(false);
+      disp.setScreenTouchActive(true);
+    }
+    else if (nightLightButton.contains(x, y)) {
+      ledMaster.nightLightToggle();
+      drawRoomLightButton(false);
+      drawNightLightButton(false);
+      disp.setScreenTouchActive(true);
+    }
+    else {
+      disp.setCurrentMode(MAIN_MODE);
+    }
+  }
+  else {
+    disp.setCurrentMode(CURRENT_WX_MODE);
   }
 }
 
@@ -429,7 +466,6 @@ void touchLightMode(uint16_t x, uint16_t y) {
   static HsbColor lastReadColor;
   static HsbColor lastRoomColor;
   static HsbColor lastNightColor;
-
 
   //set up variables and function pointers
   HsbColor *lastColor;

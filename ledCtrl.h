@@ -35,6 +35,7 @@ class ledCtrl {
 
   private:
     bool roomLightState = false;
+    bool sunriseLightState = false;
     bool readLightState = false;
     bool nightLightState = false;
     char varName[7];
@@ -158,10 +159,22 @@ class ledCtrl {
     }
 
     // ================================
+    // ===== Sunrise Light Code =======
+    // ================================
+    void sunriseLightOn() {
+      sunriseLightState = true;
+    }
+
+    void sunriseLightOff() {
+      sunriseLightState = false;
+    }
+
+    // ================================
     // ===== Room Light Code ==========
     // ================================
     void roomLightOn() {
       nightLightState = false;
+      sunriseLightState = false;
       roomLightState = true;
       activeRoomColor = roomColor;
     }
@@ -173,6 +186,7 @@ class ledCtrl {
     void roomLightToggle() {
       if (roomLightState == false) {
         nightLightState = false;
+        sunriseLightState = false;
         roomLightState = true;
         activeRoomColor = roomColor;
 
@@ -201,6 +215,10 @@ class ledCtrl {
       s = round(s * 20) / 20;
       b = round(b * 20) / 20;
 
+      if (h == 1.0) {
+        h = 0.0;
+      }
+
       roomColor = HsbColor(h, s, b);
       if (roomLightState) lightRoomLight(roomColor);
     }
@@ -220,8 +238,21 @@ class ledCtrl {
       s = round(s * 20) / 20;
       b = round(b * 20) / 20;
 
+      if (h == 1.0) {
+        h = 0.0;
+      }
+
       activeRoomColor = HsbColor(h, s, b);
-      if (roomLightState) lightRoomLight(roomColor);
+      if (roomLightState) {
+        lightRoomLight(activeRoomColor);
+      }
+    }
+
+    void setActiveSunriseRoomLightColorHSB(float h, float s, float b) {
+      activeRoomColor = HsbColor(h, s, b);
+      if (sunriseLightState) {
+        lightRoomLight(activeRoomColor);
+      }
     }
 
     HsbColor getRoomLightColorHSB ( void ) {
@@ -270,6 +301,10 @@ class ledCtrl {
       s = round(s * 20) / 20;
       b = round(b * 20) / 20;
 
+      if (h == 1.0) {
+        h = 0.0;
+      }
+
       readColor = HsbColor(h, s, b);
     }
 
@@ -287,6 +322,10 @@ class ledCtrl {
       h = round(h * 20) / 20;
       s = round(s * 20) / 20;
       b = round(b * 20) / 20;
+
+      if (h == 1.0) {
+        h = 0.0;
+      }
 
       activeReadColor = HsbColor(h, s, b);
     }
@@ -338,6 +377,10 @@ class ledCtrl {
       s = round(s * 20) / 20;
       b = round(b * 20) / 20;
 
+      if (h == 1.0) {
+        h = 0.0;
+      }
+
       nightColor = HsbColor(h, s, b);
       if (nightLightState) lightRoomLight(nightColor);
     }
@@ -357,8 +400,12 @@ class ledCtrl {
       s = round(s * 20) / 20;
       b = round(b * 20) / 20;
 
+      if (h == 1.0) {
+        h = 0.0;
+      }
+
       activeRoomColor = HsbColor(h, s, b);
-      if (nightLightState) lightRoomLight(nightColor);
+      if (nightLightState) lightRoomLight(activeRoomColor);
     }
 
 
